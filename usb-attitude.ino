@@ -1,3 +1,7 @@
+//
+// Check data on Raspi:   screen  /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_34:B7:DA:F8:2C:D8-if00  115200
+// Use port:  /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_34:B7:DA:F8:2C:D8-if00
+//
 
 #include <Wire.h>
 #include <ArduinoJson.h>                      // http://librarymanager/All#ArduinoJson by Benoi Blanchon
@@ -46,15 +50,15 @@ void setup() {
   doc["updates"][0]["values"][0]["value"]["yaw"] = 0.0;
   doc["updates"][0]["values"][0]["value"]["pitch"] = 0.0;
   doc["updates"][0]["values"][0]["value"]["roll"] = 0.0;
-  // doc["updates"][0]["meta"][0]["path"] = "navigation.attitude.yaw";
-  // doc["updates"][0]["meta"][0]["value"]["units"] = "rad";
-  // doc["updates"][0]["meta"][0]["value"]["description"] = "Yaw, +ve is heading change to starboard";
-  // doc["updates"][0]["meta"][1]["path"] = "navigation.attitude.pitch";
-  // doc["updates"][0]["meta"][1]["value"]["units"] = "rad";
-  // doc["updates"][0]["meta"][1]["value"]["description"] = "Pitch, +ve is bow up";
-  // doc["updates"][0]["meta"][2]["path"] = "navigation.attitude.roll";
-  // doc["updates"][0]["meta"][2]["value"]["units"] = "rad";
-  // doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
+  doc["updates"][0]["meta"][0]["path"] = "navigation.attitude.yaw";
+  doc["updates"][0]["meta"][0]["value"]["units"] = "rad";
+  doc["updates"][0]["meta"][0]["value"]["description"] = "Yaw, +ve is heading change to starboard";
+  doc["updates"][0]["meta"][1]["path"] = "navigation.attitude.pitch";
+  doc["updates"][0]["meta"][1]["value"]["units"] = "rad";
+  doc["updates"][0]["meta"][1]["value"]["description"] = "Pitch, +ve is bow up";
+  doc["updates"][0]["meta"][2]["path"] = "navigation.attitude.roll";
+  doc["updates"][0]["meta"][2]["value"]["units"] = "rad";
+  doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
 
   // doc["context"] = "self";
   // doc["$source"] = "USB.Attitude";
