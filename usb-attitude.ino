@@ -14,7 +14,7 @@
 #define PIN_SCL GPIO_NUM_7
 #define PIN_TARE GPIO_NUM_10
 #define PIN_LED GPIO_NUM_8
-#define INTERVAL_MS 500
+#define INTERVAL_MS 200
 #define BUTTON_MINIMAL_MS 200
 
 // Global variables
@@ -60,26 +60,8 @@ void setup() {
   doc["updates"][0]["meta"][2]["value"]["units"] = "rad";
   doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
 
-  // doc["context"] = "self";
-  // doc["$source"] = "USB.Attitude";
-  // doc["meta"]["description"] = "Yaw Pitch Roll";
-  // doc["meta"]["properties"]["roll"]["type"] = "number";
-  // doc["meta"]["properties"]["roll"]["description"] = "Vessel roll, +ve is list to starboard";
-  // doc["meta"]["properties"]["roll"]["units"] = "rad";
-  // doc["meta"]["properties"]["pitch"]["type"] = "number";
-  // doc["meta"]["properties"]["pitch"]["description"] = "Pitch, +ve is bow up";
-  // doc["meta"]["properties"]["pitch"]["units"] = "rad";
-  // doc["meta"]["properties"]["yaw"]["type"] = "number";
-  // doc["meta"]["properties"]["yaw"]["description"] = "Yaw, +ve is heading change to starboard";
-  // doc["meta"]["properties"]["yaw"]["units"] = "rad";
-  // doc["value"]["yaw"] = 0;
-  // doc["value"]["pitch"] = 0;
-  // doc["value"]["roll"] = 0;
-  // doc["timestamp"] = 0;
-  // doc["pgn"] = 127257;
-
   while (!Serial) {
-    errorWait(1);  // Wait for Serial to become available.
+    errorWait(0.4);  // Wait for Serial to become available.
   }
 
   Serial.println();
@@ -98,6 +80,7 @@ void setup() {
 
 void setReports(void) {
   while (!myIMU.enableRotationVector()) {
+  // while (!myIMU.enableGeomagneticRotationVector()) {
     // Serial.println("# Could not enable rotation vector. Retrying...");
     errorWait(0.4);
   }
@@ -118,7 +101,9 @@ void loop() {
     buttonDown = now;
   }
   if (buttonState == HIGH && buttonDown && now - buttonDown > BUTTON_MINIMAL_MS) {
-    myIMU.tareNow();
+    //myIMU.clearTare();
+    //myIMU.saveTare();
+    myIMU.tareNow(false, SH2_TARE_BASIS_ROTATION_VECTOR);
     myIMU.saveTare();
     // Serial.println("# TARE SET");
     buttonDown = 0;
@@ -127,15 +112,11 @@ void loop() {
   // Send data at interval
   if (now - lastSent > INTERVAL_MS) {
     lastSent = now;
-    if (myIMU.getSensorEvent() == true && myIMU.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR) {
-      double yaw = myIMU.getYaw();         // + PI;   // Heading in radians.
-      double roll = myIMU.getRoll() * -1;  // Roll in radians. Positive, when tilted right (starboard).
-      double pitch = myIMU.getPitch();     // Pitch in radians. Positive, when your bow rises.
+    if (myIMU.getSensorEvent() == true && (myIMU.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR || myIMU.getSensorEventID() == SENSOR_REPORTID_GEOMAGNETIC_ROTATION_VECTOR)) {
 
-      // doc["updates"][0]["timestamp"] = now / 1000.0;
-      doc["updates"][0]["values"][0]["value"]["yaw"] = yaw;
-      doc["updates"][0]["values"][0]["value"]["pitch"] = pitch;
-      doc["updates"][0]["values"][0]["value"]["roll"] = roll;
+      doc["updates"][0]["values"][0]["value"]["yaw"] = myIMU.getYaw();          // + PI; // Heading in radians, increasing when turning to starboard.
+      doc["updates"][0]["values"][0]["value"]["pitch"] = myIMU.getRoll() * -1;  // Roll in radians. Positive, when tilted right (starboard).
+      doc["updates"][0]["values"][0]["value"]["roll"] = myIMU.getPitch();       // Pitch in radians. Positive, when your bow rises.
 
       serializeJson(doc, Serial);
       Serial.println();
