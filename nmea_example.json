@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "description": "Yaw Pitch Roll",
+    "properties": {
+      "roll": {
+        "type": "number",
+        "description": "Vessel roll, +ve is list to starboard",
+        "units": "rad"
+      },
+      "pitch": {
+        "type": "number",
+        "description": "Pitch, +ve is bow up",
+        "units": "rad"
+      },
+      "yaw": {
+        "type": "number",
+        "description": "Yaw, +ve is heading change to starboard",
+        "units": "rad"
+      }
+    }
+  },
+  "value": {
+    "yaw": -2.8309,
+    "pitch": 0.2015,
+    "roll": -0.3728
+  },
+  "$source": "PiCAN-M.15",
+  "timestamp": "2024-08-03T19:57:34.035Z",
+  "pgn": 127257
+}
