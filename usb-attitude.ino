@@ -34,26 +34,27 @@ void setup() {
   pinMode(PIN_LED, OUTPUT);
   digitalWrite(PIN_LED, LOW);  // On
   pinMode(PIN_TARE, INPUT_PULLUP);
-
+  doc["context"] = "vessels.self";
+  doc["updates"][0]["$source"] = "USB.Attitude";
   doc["updates"][0]["source"]["type"] = "SERIAL";
   doc["updates"][0]["source"]["device"] = "USB Serial";
   doc["updates"][0]["source"]["label"] = "USB";
-  doc["updates"][0]["source"]["src"] = "USB-Attitude";
+  doc["updates"][0]["source"]["src"] = "Attitude";
   doc["updates"][0]["source"]["pgn"] = 127257;
-  doc["updates"][0]["timestamp"] = 0.001; // float
+  // doc["updates"][0]["timestamp"] = 0.0; // float
   doc["updates"][0]["values"][0]["path"] = "navigation.attitude";
-  doc["updates"][0]["values"][0]["value"]["yaw"] = 0;
-  doc["updates"][0]["values"][0]["value"]["pitch"] = 0;
-  doc["updates"][0]["values"][0]["value"]["roll"] = 0;
-  doc["updates"][0]["meta"][0]["path"] = "navigation.attitude.yaw";
-  doc["updates"][0]["meta"][0]["value"]["units"] = "rad";
-  doc["updates"][0]["meta"][0]["value"]["description"] = "Yaw, +ve is heading change to starboard";
-  doc["updates"][0]["meta"][1]["path"] = "navigation.attitude.pitch";
-  doc["updates"][0]["meta"][1]["value"]["units"] = "rad";
-  doc["updates"][0]["meta"][1]["value"]["description"] = "Pitch, +ve is bow up";
-  doc["updates"][0]["meta"][2]["path"] = "navigation.attitude.roll";
-  doc["updates"][0]["meta"][2]["value"]["units"] = "rad";
-  doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
+  doc["updates"][0]["values"][0]["value"]["yaw"] = 0.0;
+  doc["updates"][0]["values"][0]["value"]["pitch"] = 0.0;
+  doc["updates"][0]["values"][0]["value"]["roll"] = 0.0;
+  // doc["updates"][0]["meta"][0]["path"] = "navigation.attitude.yaw";
+  // doc["updates"][0]["meta"][0]["value"]["units"] = "rad";
+  // doc["updates"][0]["meta"][0]["value"]["description"] = "Yaw, +ve is heading change to starboard";
+  // doc["updates"][0]["meta"][1]["path"] = "navigation.attitude.pitch";
+  // doc["updates"][0]["meta"][1]["value"]["units"] = "rad";
+  // doc["updates"][0]["meta"][1]["value"]["description"] = "Pitch, +ve is bow up";
+  // doc["updates"][0]["meta"][2]["path"] = "navigation.attitude.roll";
+  // doc["updates"][0]["meta"][2]["value"]["units"] = "rad";
+  // doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
 
   // doc["context"] = "self";
   // doc["$source"] = "USB.Attitude";
@@ -82,8 +83,8 @@ void setup() {
   Wire.begin(PIN_SDA, PIN_SCL);
 
   while (myIMU.begin(BNO08X_ADDR, Wire, BNO08X_INT, BNO08X_RST) == false) {
-    Serial.println("# BNO08x not detected at default I2C address. Retrying...");
-    errorWait(1);
+    // Serial.println("# BNO08x not detected at default I2C address. Retrying...");
+    errorWait(0.4);
   }
   setReports();
 
@@ -92,8 +93,9 @@ void setup() {
 }
 
 void setReports(void) {
-  if (!myIMU.enableRotationVector()) {
-    Serial.println("# Could not enable rotation vector");
+  while (!myIMU.enableRotationVector()) {
+    // Serial.println("# Could not enable rotation vector. Retrying...");
+    errorWait(0.4);
   }
 }
 
@@ -102,7 +104,7 @@ void loop() {
 
   //// Detect IMU Reset
   if (myIMU.wasReset()) {
-    Serial.println("# BNO08x was reset.");
+    // Serial.println("# BNO08x was reset.");
     setReports();
   }
 
@@ -114,7 +116,7 @@ void loop() {
   if (buttonState == HIGH && buttonDown && now - buttonDown > BUTTON_MINIMAL_MS) {
     myIMU.tareNow();
     myIMU.saveTare();
-    Serial.println("# TARE SET");
+    // Serial.println("# TARE SET");
     buttonDown = 0;
   }
 
@@ -126,15 +128,10 @@ void loop() {
       double roll = myIMU.getRoll() * -1;  // Roll in radians. Positive, when tilted right (starboard).
       double pitch = myIMU.getPitch();     // Pitch in radians. Positive, when your bow rises.
 
-      doc["updates"][0]["timestamp"] = float(now / 1000);
+      // doc["updates"][0]["timestamp"] = now / 1000.0;
       doc["updates"][0]["values"][0]["value"]["yaw"] = yaw;
       doc["updates"][0]["values"][0]["value"]["pitch"] = pitch;
       doc["updates"][0]["values"][0]["value"]["roll"] = roll;
-
-//       doc["value"]["yaw"] = yaw;
-//       doc["value"]["pitch"] = pitch;
-//       doc["value"]["roll"] = roll;
-//       doc["timestamp"] = now / 1000;
 
       serializeJson(doc, Serial);
       Serial.println();
