@@ -5,6 +5,7 @@
 
 #include <Wire.h>            // ESP32
 #include <Preferences.h>     // ESP32
+#include <WiFi.h>            // ESP32
 #include <ArduinoJson.h>     // http://librarymanager/All#ArduinoJson by Benoi Blanchon
 #include <Adafruit_BNO055.h> // http://librarymanager/All#Adafruit_BNO055 by Adafruit
 
@@ -89,10 +90,11 @@ void setup() {
 
   initializeJsonDocument();
 
-  while (!Serial) {
-    errorWait(0.4);  // Wait for Serial to become available.
-  }
   Serial.println();
+
+  // Disable WiFi
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
 
   tareYaw = readFloatFromStorage("tareYaw", 0.0);
   tarePitch = readFloatFromStorage("tarePitch", 0.0);
