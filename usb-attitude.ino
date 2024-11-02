@@ -3,25 +3,41 @@
 // Use port:  /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_34:B7:DA:F8:2C:D8-if00
 //
 
-#include <Wire.h>
-#include <ArduinoJson.h>                      // http://librarymanager/All#ArduinoJson by Benoi Blanchon
-#include <SparkFun_BNO08x_Arduino_Library.h>  // http://librarymanager/All#SparkFun_BNO08x by SparkFun
+#include <Wire.h>            // ESP32
+#include <Preferences.h>     // ESP32
+#include <ArduinoJson.h>     // http://librarymanager/All#ArduinoJson by Benoi Blanchon
+#include <Adafruit_BNO055.h> // http://librarymanager/All#Adafruit_BNO055 by Adafruit
 
-#define BNO08X_INT GPIO_NUM_3
-#define BNO08X_RST GPIO_NUM_4
-#define BNO08X_ADDR 0x4B
 #define PIN_SDA GPIO_NUM_6
 #define PIN_SCL GPIO_NUM_7
 #define PIN_TARE GPIO_NUM_10
 #define PIN_LED GPIO_NUM_8
-#define INTERVAL_MS 200
+#define BNO055_ADDR 0x29
+#define INTERVAL_MS 100
 #define BUTTON_MINIMAL_MS 200
+
+typedef struct {
+  float roll;  /**< Rotation around the longitudinal axis (the plane body, 'X
+                     axis'). Roll is positive and increasing when moving
+                     downward. -90 degrees <= roll <= 90 degrees */
+  float pitch; /**< Rotation around the lateral axis (the wing span, 'Y
+                        axis'). Pitch is positive and increasing when moving
+                        upwards. -180 degrees <= pitch <= 180 degrees) */
+  float yaw;   /**< Angle between the longitudinal axis (the plane body)
+                        and magnetic north, measured clockwise when viewing from
+                        the top of the device. 0-359 degrees */
+} attitude_t;
 
 // Global variables
 unsigned long lastSent = 0;
 unsigned long buttonDown = 0;
-BNO08x myIMU;
+uint16_t BNO055_SAMPLERATE_DELAY_MS = 100;
+Adafruit_BNO055 bno = Adafruit_BNO055(55, BNO055_ADDR, &Wire);
 JsonDocument doc;
+Preferences preferences;  // Nonvolatile storage on ESP32
+float tareYaw = 0.0;
+float tareRoll = 0.0;
+float tarePitch = 0.0;
 
 void errorWait(int sec) {
   for (int i = 0; i <= sec; i++) {
@@ -31,6 +47,21 @@ void errorWait(int sec) {
     delay(200);
   }
   digitalWrite(PIN_LED, LOW);  // On
+}
+
+int readFloatFromStorage(const char* key, float defaultValue) {
+  preferences.begin("nvs", false);
+  float value = preferences.getFloat(key, defaultValue);
+  preferences.end();
+  Serial.printf("# Received %s from storage: %7.03f\n", key, value);
+  return value;
+}
+
+void writeFloatToStorage(const char* key, float value) {
+  preferences.begin("nvs", false);
+  preferences.putFloat(key, value);
+  preferences.end();
+  Serial.printf("# Written %s to storage: %7.03f\n", key, value);
 }
 
 void setup() {
@@ -66,34 +97,59 @@ void setup() {
 
   Serial.println();
 
+  tareYaw = readFloatFromStorage("tareYaw", 0.0);
+  tarePitch = readFloatFromStorage("tarePitch", 0.0);
+  tareRoll = readFloatFromStorage("tareRoll", 0.0);
+
   Wire.begin(PIN_SDA, PIN_SCL);
 
-  while (myIMU.begin(BNO08X_ADDR, Wire, BNO08X_INT, BNO08X_RST) == false) {
-    // Serial.println("# BNO08x not detected at default I2C address. Retrying...");
+  while (!bno.begin()) {
+    Serial.println("# BNO055 not detected. Retrying...");
     errorWait(0.4);
   }
-  setReports();
+  bno.setExtCrystalUse(true);
 
   delay(100);
   digitalWrite(PIN_LED, HIGH);  // Off
 }
 
-void setReports(void) {
-  while (!myIMU.enableRotationVector()) {
-  // while (!myIMU.enableGeomagneticRotationVector()) {
-    // Serial.println("# Could not enable rotation vector. Retrying...");
-    errorWait(0.4);
+float degToRad(float deg) {
+  return deg * 71.0 / 4068.0;
+}
+
+bool getAttitude(attitude_t* attitude, bool applyTare = true) {
+  sensors_event_t event;
+  bno.getEvent(&event, Adafruit_BNO055::VECTOR_EULER);
+  attitude->yaw = event.orientation.x;
+  attitude->pitch = event.orientation.z;
+  attitude->roll = event.orientation.y;
+  if (applyTare) {
+    attitude->yaw -= tareYaw;
+    if (attitude->yaw < 0.0) attitude->yaw += 360.0;
+    if (attitude->yaw >= 360.0) attitude->yaw -= 360.0;
+    attitude->pitch -= tarePitch;
+    if (attitude->pitch < -180.0) attitude->pitch += 360.0;
+    if (attitude->pitch > 180.0) attitude->pitch -= 360.0;
+    attitude->roll -= tareRoll;
+    if (attitude->roll < -90.0) attitude->roll = -90.0 - (-90.0 - attitude->roll);  // -95 > -85
+    if (attitude->roll > 90.0) attitude->roll = 90.0 + (90.0 - attitude->roll);     // 95 > 85
   }
+  return true;
+}
+
+void tare() {
+  attitude_t attitude;
+  getAttitude(&attitude, false);
+  tareYaw = attitude.yaw;
+  writeFloatToStorage("tareYaw", tareYaw);
+  tarePitch = attitude.pitch;
+  writeFloatToStorage("tarePitch", tarePitch);
+  tareRoll = attitude.roll;
+  writeFloatToStorage("tareRoll", tareRoll);
 }
 
 void loop() {
   unsigned long now = millis();
-
-  //// Detect IMU Reset
-  if (myIMU.wasReset()) {
-    // Serial.println("# BNO08x was reset.");
-    setReports();
-  }
 
   //// Tare Button
   bool buttonState = digitalRead(PIN_TARE);
@@ -101,23 +157,19 @@ void loop() {
     buttonDown = now;
   }
   if (buttonState == HIGH && buttonDown && now - buttonDown > BUTTON_MINIMAL_MS) {
-    //myIMU.clearTare();
-    //myIMU.saveTare();
-    myIMU.tareNow(false, SH2_TARE_BASIS_ROTATION_VECTOR);
-    myIMU.saveTare();
-    // Serial.println("# TARE SET");
+    tare();
+    Serial.println("# TARE SET");
     buttonDown = 0;
   }
 
   // Send data at interval
   if (now - lastSent > INTERVAL_MS) {
     lastSent = now;
-    if (myIMU.getSensorEvent() == true && (myIMU.getSensorEventID() == SENSOR_REPORTID_ROTATION_VECTOR || myIMU.getSensorEventID() == SENSOR_REPORTID_GEOMAGNETIC_ROTATION_VECTOR)) {
-
-      doc["updates"][0]["values"][0]["value"]["yaw"] = myIMU.getYaw();          // + PI; // Heading in radians, increasing when turning to starboard.
-      doc["updates"][0]["values"][0]["value"]["pitch"] = myIMU.getRoll() * -1;  // Roll in radians. Positive, when tilted right (starboard).
-      doc["updates"][0]["values"][0]["value"]["roll"] = myIMU.getPitch();       // Pitch in radians. Positive, when your bow rises.
-
+    attitude_t attitude;
+    if (getAttitude(&attitude)) {
+      doc["updates"][0]["values"][0]["value"]["yaw"] = degToRad(attitude.yaw);          // + PI; // Heading in radians, increasing when turning to starboard.
+      doc["updates"][0]["values"][0]["value"]["pitch"] = degToRad(attitude.pitch * -1); // Pitch in radians. Positive, when your bow rises.
+      doc["updates"][0]["values"][0]["value"]["roll"] = degToRad(attitude.roll * -1);   // Roll in radians. Positive, when tilted right (starboard).
       serializeJson(doc, Serial);
       Serial.println();
     }
