@@ -8,33 +8,27 @@
 #include <ArduinoJson.h>     // http://librarymanager/All#ArduinoJson by Benoi Blanchon
 #include <Adafruit_BNO055.h> // http://librarymanager/All#Adafruit_BNO055 by Adafruit
 
-#define PIN_SDA GPIO_NUM_6
-#define PIN_SCL GPIO_NUM_7
-#define PIN_TARE GPIO_NUM_10
-#define PIN_LED GPIO_NUM_8
-#define BNO055_ADDR 0x29
-#define INTERVAL_MS 100
-#define BUTTON_MINIMAL_MS 200
+const int PIN_SDA = GPIO_NUM_6;
+const int PIN_SCL = GPIO_NUM_7;
+const int PIN_TARE = GPIO_NUM_10;
+const int PIN_LED = GPIO_NUM_8;
+const uint8_t BNO055_ADDR = 0x29;
+const unsigned long INTERVAL_MS = 100;
+const unsigned long BUTTON_MINIMAL_MS = 200;
+const uint16_t BNO055_SAMPLERATE_DELAY_MS = 100;
 
 typedef struct {
-  float roll;  /**< Rotation around the longitudinal axis (the plane body, 'X
-                     axis'). Roll is positive and increasing when moving
-                     downward. -90 degrees <= roll <= 90 degrees */
-  float pitch; /**< Rotation around the lateral axis (the wing span, 'Y
-                        axis'). Pitch is positive and increasing when moving
-                        upwards. -180 degrees <= pitch <= 180 degrees) */
-  float yaw;   /**< Angle between the longitudinal axis (the plane body)
-                        and magnetic north, measured clockwise when viewing from
-                        the top of the device. 0-359 degrees */
+  float roll;  /**< Rotation around the longitudinal axis (the plane body, 'X axis'). Roll is positive and increasing when moving downward. -90 degrees <= roll <= 90 degrees */
+  float pitch; /**< Rotation around the lateral axis (the wing span, 'Y axis'). Pitch is positive and increasing when moving upwards. -180 degrees <= pitch <= 180 degrees) */
+  float yaw;   /**< Angle between the longitudinal axis (the plane body) and magnetic north, measured clockwise when viewing from the top of the device. 0-359 degrees */
 } attitude_t;
 
 // Global variables
 unsigned long lastSent = 0;
 unsigned long buttonDown = 0;
-uint16_t BNO055_SAMPLERATE_DELAY_MS = 100;
 Adafruit_BNO055 bno = Adafruit_BNO055(55, BNO055_ADDR, &Wire);
-JsonDocument doc;
-Preferences preferences;  // Nonvolatile storage on ESP32
+StaticJsonDocument<1024> doc;
+Preferences preferences;
 float tareYaw = 0.0;
 float tareRoll = 0.0;
 float tarePitch = 0.0;
@@ -49,7 +43,7 @@ void errorWait(int sec) {
   digitalWrite(PIN_LED, LOW);  // On
 }
 
-int readFloatFromStorage(const char* key, float defaultValue) {
+float readFloatFromStorage(const char* key, float defaultValue) {
   preferences.begin("nvs", false);
   float value = preferences.getFloat(key, defaultValue);
   preferences.end();
@@ -64,11 +58,7 @@ void writeFloatToStorage(const char* key, float value) {
   Serial.printf("# Written %s to storage: %7.03f\n", key, value);
 }
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, LOW);  // On
-  pinMode(PIN_TARE, INPUT_PULLUP);
+void initializeJsonDocument() {
   doc["context"] = "vessels.self";
   doc["updates"][0]["$source"] = "USB.Attitude";
   doc["updates"][0]["source"]["type"] = "SERIAL";
@@ -76,7 +66,6 @@ void setup() {
   doc["updates"][0]["source"]["label"] = "USB";
   doc["updates"][0]["source"]["src"] = "Attitude";
   doc["updates"][0]["source"]["pgn"] = 127257;
-  // doc["updates"][0]["timestamp"] = 0.0; // float
   doc["updates"][0]["values"][0]["path"] = "navigation.attitude";
   doc["updates"][0]["values"][0]["value"]["yaw"] = 0.0;
   doc["updates"][0]["values"][0]["value"]["pitch"] = 0.0;
@@ -90,18 +79,29 @@ void setup() {
   doc["updates"][0]["meta"][2]["path"] = "navigation.attitude.roll";
   doc["updates"][0]["meta"][2]["value"]["units"] = "rad";
   doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);  // On
+  pinMode(PIN_TARE, INPUT_PULLUP);
+
+  initializeJsonDocument();
 
   while (!Serial) {
     errorWait(0.4);  // Wait for Serial to become available.
   }
-
   Serial.println();
 
   tareYaw = readFloatFromStorage("tareYaw", 0.0);
   tarePitch = readFloatFromStorage("tarePitch", 0.0);
   tareRoll = readFloatFromStorage("tareRoll", 0.0);
 
-  Wire.begin(PIN_SDA, PIN_SCL);
+  while (!Wire.begin(PIN_SDA, PIN_SCL)) {
+    Serial.println("# Wire initialization failed. Retrying...");
+    errorWait(0.4);
+  }
 
   while (!bno.begin()) {
     Serial.println("# BNO055 not detected. Retrying...");
@@ -148,10 +148,7 @@ void tare() {
   writeFloatToStorage("tareRoll", tareRoll);
 }
 
-void loop() {
-  unsigned long now = millis();
-
-  //// Tare Button
+void handleTareButton(unsigned long now) {
   bool buttonState = digitalRead(PIN_TARE);
   if (buttonState == LOW && buttonDown == 0) {
     buttonDown = now;
@@ -161,17 +158,26 @@ void loop() {
     Serial.println("# TARE SET");
     buttonDown = 0;
   }
+}
 
-  // Send data at interval
+void sendData() {
+  attitude_t attitude;
+  if (getAttitude(&attitude)) {
+    doc["updates"][0]["values"][0]["value"]["yaw"] = degToRad(attitude.yaw);          // + PI; // Heading in radians, increasing when turning to starboard.
+    doc["updates"][0]["values"][0]["value"]["pitch"] = degToRad(attitude.pitch * -1); // Pitch in radians. Positive, when your bow rises.
+    doc["updates"][0]["values"][0]["value"]["roll"] = degToRad(attitude.roll * -1);   // Roll in radians. Positive, when tilted right (starboard).
+    serializeJson(doc, Serial);
+    Serial.println();
+  }
+}
+
+void loop() {
+  unsigned long now = millis();
+
+  handleTareButton(now);
+
   if (now - lastSent > INTERVAL_MS) {
     lastSent = now;
-    attitude_t attitude;
-    if (getAttitude(&attitude)) {
-      doc["updates"][0]["values"][0]["value"]["yaw"] = degToRad(attitude.yaw);          // + PI; // Heading in radians, increasing when turning to starboard.
-      doc["updates"][0]["values"][0]["value"]["pitch"] = degToRad(attitude.pitch * -1); // Pitch in radians. Positive, when your bow rises.
-      doc["updates"][0]["values"][0]["value"]["roll"] = degToRad(attitude.roll * -1);   // Roll in radians. Positive, when tilted right (starboard).
-      serializeJson(doc, Serial);
-      Serial.println();
-    }
+    sendData();
   }
 }
