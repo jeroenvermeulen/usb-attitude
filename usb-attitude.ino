@@ -3,11 +3,11 @@
 // Use port:  /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_34:B7:DA:F8:2C:D8-if00
 //
 
-#include <Wire.h>            // ESP32
-#include <Preferences.h>     // ESP32
-#include <WiFi.h>            // ESP32
-#include <ArduinoJson.h>     // http://librarymanager/All#ArduinoJson by Benoi Blanchon
-#include <Adafruit_BNO055.h> // http://librarymanager/All#Adafruit_BNO055 by Adafruit
+#include <Wire.h>             // ESP32
+#include <Preferences.h>      // ESP32
+#include <WiFi.h>             // ESP32
+#include <ArduinoJson.h>      // http://librarymanager/All#ArduinoJson by Benoi Blanchon
+#include <Adafruit_BNO055.h>  // http://librarymanager/All#Adafruit_BNO055 by Adafruit
 
 const int PIN_SDA = GPIO_NUM_6;
 const int PIN_SCL = GPIO_NUM_7;
@@ -17,6 +17,7 @@ const uint8_t BNO055_ADDR = 0x29;
 const unsigned long INTERVAL_MS = 100;
 const unsigned long BUTTON_MINIMAL_MS = 200;
 const uint16_t BNO055_SAMPLERATE_DELAY_MS = 100;
+const unsigned long MAX_ZERO_TIME_MS = 60000;
 
 typedef struct {
   float roll;  /**< Rotation around the longitudinal axis (the plane body, 'X axis'). Roll is positive and increasing when moving downward. -90 degrees <= roll <= 90 degrees */
@@ -27,6 +28,7 @@ typedef struct {
 // Global variables
 unsigned long lastSent = 0;
 unsigned long buttonDown = 0;
+unsigned long zeroReceived = 0;
 Adafruit_BNO055 bno = Adafruit_BNO055(55, BNO055_ADDR, &Wire);
 StaticJsonDocument<1024> doc;
 Preferences preferences;
@@ -82,39 +84,6 @@ void initializeJsonDocument() {
   doc["updates"][0]["meta"][2]["value"]["description"] = "Vessel roll, +ve is list to starboard";
 }
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_LED, OUTPUT);
-  digitalWrite(PIN_LED, LOW);  // On
-  pinMode(PIN_TARE, INPUT_PULLUP);
-
-  initializeJsonDocument();
-
-  Serial.println();
-
-  // Disable WiFi
-  WiFi.disconnect();
-  WiFi.mode(WIFI_OFF);
-
-  tareYaw = readFloatFromStorage("tareYaw", 0.0);
-  tarePitch = readFloatFromStorage("tarePitch", 0.0);
-  tareRoll = readFloatFromStorage("tareRoll", 0.0);
-
-  while (!Wire.begin(PIN_SDA, PIN_SCL)) {
-    Serial.println("# Wire initialization failed. Retrying...");
-    errorWait(0.4);
-  }
-
-  while (!bno.begin()) {
-    Serial.println("# BNO055 not detected. Retrying...");
-    errorWait(0.4);
-  }
-  bno.setExtCrystalUse(true);
-
-  delay(100);
-  digitalWrite(PIN_LED, HIGH);  // Off
-}
-
 float degToRad(float deg) {
   return deg * 71.0 / 4068.0;
 }
@@ -142,12 +111,9 @@ bool getAttitude(attitude_t* attitude, bool applyTare = true) {
 void tare() {
   attitude_t attitude;
   getAttitude(&attitude, false);
-  tareYaw = attitude.yaw;
-  writeFloatToStorage("tareYaw", tareYaw);
-  tarePitch = attitude.pitch;
-  writeFloatToStorage("tarePitch", tarePitch);
-  tareRoll = attitude.roll;
-  writeFloatToStorage("tareRoll", tareRoll);
+  writeFloatToStorage("tareYaw", attitude.yaw);
+  writeFloatToStorage("tarePitch", attitude.pitch);
+  writeFloatToStorage("tareRoll", attitude.roll);
 }
 
 void handleTareButton(unsigned long now) {
@@ -157,20 +123,68 @@ void handleTareButton(unsigned long now) {
   }
   if (buttonState == HIGH && buttonDown && now - buttonDown > BUTTON_MINIMAL_MS) {
     tare();
-    Serial.println("# TARE SET");
     buttonDown = 0;
   }
 }
 
-void sendData() {
+void sendData(unsigned long now) {
   attitude_t attitude;
   if (getAttitude(&attitude)) {
-    doc["updates"][0]["values"][0]["value"]["yaw"] = degToRad(attitude.yaw);          // + PI; // Heading in radians, increasing when turning to starboard.
-    doc["updates"][0]["values"][0]["value"]["pitch"] = degToRad(attitude.pitch * -1); // Pitch in radians. Positive, when your bow rises.
-    doc["updates"][0]["values"][0]["value"]["roll"] = degToRad(attitude.roll * -1);   // Roll in radians. Positive, when tilted right (starboard).
+    doc["updates"][0]["values"][0]["value"]["yaw"] = degToRad(attitude.yaw);           // + PI; // Heading in radians, increasing when turning to starboard.
+    doc["updates"][0]["values"][0]["value"]["pitch"] = degToRad(attitude.pitch * -1);  // Pitch in radians. Positive, when your bow rises.
+    doc["updates"][0]["values"][0]["value"]["roll"] = degToRad(attitude.roll * -1);    // Roll in radians. Positive, when tilted right (starboard).
     serializeJson(doc, Serial);
     Serial.println();
+    if (attitude.yaw == 0.0 && attitude.pitch == 0.0 && attitude.roll == 0.0) {
+      if (zeroReceived == 0) {
+        zeroReceived = now;
+      }
+      if (now - zeroReceived > MAX_ZERO_TIME_MS) {
+        zeroReceived = 0;
+        Serial.println("# Received zero for too long, resetting...");
+        setup();
+      }
+    }
   }
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);  // On
+  pinMode(PIN_TARE, INPUT_PULLUP);
+
+  initializeJsonDocument();
+
+  Serial.println();
+
+  // Disable WiFi
+  WiFi.disconnect();
+  WiFi.mode(WIFI_OFF);
+
+  tareYaw = readFloatFromStorage("tareYaw", 0.0);
+  tarePitch = readFloatFromStorage("tarePitch", 0.0);
+  tareRoll = readFloatFromStorage("tareRoll", 0.0);
+
+  while (!Wire.begin(PIN_SDA, PIN_SCL)) {
+    Serial.println("# Wire initialization failed. Retrying...");
+    errorWait(0.4);
+  }
+
+  delay(200);
+
+  while (!bno.begin()) {
+    Serial.println("# BNO055 not detected. Retrying...");
+    errorWait(0.4);
+  }
+  bno.setExtCrystalUse(true);
+
+  attitude_t attitude;
+  getAttitude(&attitude);
+
+  delay(400);
+
+  digitalWrite(PIN_LED, HIGH);  // Off
 }
 
 void loop() {
@@ -180,6 +194,6 @@ void loop() {
 
   if (now - lastSent > INTERVAL_MS) {
     lastSent = now;
-    sendData();
+    sendData(now);
   }
 }
