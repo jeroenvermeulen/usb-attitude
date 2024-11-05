@@ -111,6 +111,9 @@ bool getAttitude(attitude_t* attitude, bool applyTare = true) {
 void tare() {
   attitude_t attitude;
   getAttitude(&attitude, false);
+  tareYaw = attitude.yaw;
+  tarePitch = attitude.pitch;
+  tareRoll = attitude.roll;
   writeFloatToStorage("tareYaw", attitude.yaw);
   writeFloatToStorage("tarePitch", attitude.pitch);
   writeFloatToStorage("tareRoll", attitude.roll);
